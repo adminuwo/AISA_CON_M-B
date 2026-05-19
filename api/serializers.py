@@ -12,9 +12,11 @@ class ClientSerializer(serializers.ModelSerializer):
         return str(obj.id)
 
 class UserSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source='first_name', required=False)
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'name', 'role', 'status', 'client')
+        fields = ('id', 'username', 'email', 'name', 'first_name', 'role', 'status', 'client')
         extra_kwargs = {'password': {'write_only': True}}
 
 class AutomationSerializer(serializers.ModelSerializer):
