@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load .env
 env_path = os.path.join(BASE_DIR, '.env')
 load_dotenv(env_path)
-print(f"DEBUG: Loading .env from {env_path}. Exists: {os.path.exists(env_path)}")
+
 
 
 # Quick-start development settings - unsuitable for production
@@ -38,14 +38,13 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
+    'mongo_migrations.apps.MongoAuthConfig',
+    'mongo_migrations.apps.MongoContentTypesConfig',
+    'mongo_migrations.apps.MongoSessionsConfig',
     'django.contrib.staticfiles',
     
     # Third party
+    'django_mongodb_backend',
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt',
@@ -61,7 +60,6 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -92,6 +90,16 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
+# Use MongoDB ObjectId as default PK for all models
+DEFAULT_AUTO_FIELD = 'django_mongodb_backend.fields.ObjectIdAutoField'
+
+# Point Django built-in apps to our MongoDB-compatible migrations
+MIGRATION_MODULES = {
+    'auth': 'mongo_migrations.auth',
+    'contenttypes': 'mongo_migrations.contenttypes',
+    'sessions': 'mongo_migrations.sessions',
+}
+
 CORS_ALLOW_ALL_ORIGINS = True # For development
 
 ROOT_URLCONF = 'core.urls'
@@ -105,7 +113,6 @@ TEMPLATES = [
             'context_processors': [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
             ],
         },
     },
@@ -114,13 +121,16 @@ TEMPLATES = [
 WSGI_APPLICATION = 'core.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+# Database — MongoDB Atlas via django-mongodb-backend
+# https://www.mongodb.com/docs/languages/python/django-mongodb-backend/
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django_mongodb_backend',
+        'NAME': os.getenv('MONGODB_DB_NAME', 'aisaconnect_db'),
+        'CLIENT': {
+            'host': os.getenv('MONGODB_URI'),
+        }
     }
 }
 

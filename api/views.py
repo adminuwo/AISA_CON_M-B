@@ -21,9 +21,11 @@ class RegisterView(views.APIView):
             user = serializer.save()
             return Response({
                 "message": "User registered successfully. Waiting for admin approval.",
-                "userId": user.id
+                "userId": str(user.id)
             }, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        first_error = next(iter(serializer.errors.values()))[0]
+        return Response({"message": str(first_error)}, status=status.HTTP_400_BAD_REQUEST)
 
 class LoginView(views.APIView):
     permission_classes = []
@@ -49,7 +51,7 @@ class LoginView(views.APIView):
             return Response({
                 "token": str(refresh.access_token),
                 "user": {
-                    "id": user.id,
+                    "id": str(user.id),
                     "_id": str(user.id),
                     "name": "System Admin",
                     "email": user.email,
@@ -70,17 +72,17 @@ class LoginView(views.APIView):
         token = refresh.access_token
         token['role'] = user.role
         if user.client:
-            token['clientId'] = user.client.id
+            token['clientId'] = str(user.client.id)
 
         return Response({
             "user": {
-                "id": user.id,
+                "id": str(user.id),
                 "_id": str(user.id),
                 "name": f"{user.first_name} {user.last_name}".strip() or user.username,
                 "email": user.email,
                 "role": user.role,
-                "client": user.client.id if user.client else None,
-                "clientId": user.client.id if user.client else None
+                "client": str(user.client.id) if user.client else None,
+                "clientId": str(user.client.id) if user.client else None
             },
             "token": str(token)
         })
@@ -251,7 +253,7 @@ class AdminMessagesView(APIView):
         data = []
         for msg in messages:
             data.append({
-                "id": msg.id,
+                "id": str(msg.id),
                 "_id": str(msg.id),
                 "clientName": msg.client.business_name if msg.client else "Unknown",
                 "from_address": msg.from_address,
@@ -272,7 +274,7 @@ class AdminUsersView(APIView):
         data = []
         for user in users:
             data.append({
-                "id": user.id,
+                "id": str(user.id),
                 "name": f"{user.first_name} {user.last_name}".strip() or user.username,
                 "email": user.email,
                 "status": user.status,
@@ -482,7 +484,7 @@ class ClientMessagesView(APIView):
         data = []
         for msg in messages:
             data.append({
-                "id": msg.id,
+                "id": str(msg.id),
                 "from_address": msg.from_address,
                 "to_address": msg.to_address,
                 "body": msg.body,
