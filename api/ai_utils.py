@@ -1,7 +1,98 @@
 import os
+import numpy as np
 from openai import OpenAI
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ===== EMBEDDING FUNCTIONS =====
+
+EMBEDDING_MODEL = "text-embedding-3-small"  # 1536 dimensions, cheap & fast
+
+def get_embedding(text):
+    """
+    OpenAI se text ka embedding vector nikalta hai (1536 dimensions).
+    Cost: ~$0.02 per 1 million tokens — bahut sasta hai.
+    """
+    try:
+        # Clean and limit text
+        text = text.replace("\n", " ").strip()
+        if not text:
+            return []
+        
+        response = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=text
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"Embedding Error: {str(e)}")
+        return []
+
+
+def chunk_text(text, chunk_size=800, overlap=100):
+    """
+    Text ko overlapping chunks mein todta hai for better retrieval.
+    
+    chunk_size: words per chunk (800 words ~ 1000 tokens)
+    overlap: overlap words between chunks for context continuity
+    """
+    words = text.split()
+    chunks = []
+    
+    if len(words) <= chunk_size:
+        # Small document — single chunk
+        return [text.strip()]
+    
+    start = 0
+    while start < len(words):
+        end = start + chunk_size
+        chunk = " ".join(words[start:end])
+        chunks.append(chunk.strip())
+        start = end - overlap  # Overlap for context continuity
+    
+    return [c for c in chunks if c.strip()]
+
+
+def cosine_similarity(vec1, vec2):
+    """
+    Cosine similarity between two vectors.
+    Returns: -1 (opposite) to 1 (identical)
+    """
+    vec1 = np.array(vec1)
+    vec2 = np.array(vec2)
+    
+    dot = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    
+    return float(dot / (norm1 * norm2))
+
+
+def find_relevant_chunks(query_embedding, chunks_with_embeddings, top_k=5):
+    """
+    Query embedding ke closest chunks dhundta hai.
+    Returns: top_k most relevant chunks sorted by similarity.
+    """
+    scored = []
+    for chunk in chunks_with_embeddings:
+        if not chunk.get('embedding'):
+            continue
+        score = cosine_similarity(query_embedding, chunk['embedding'])
+        scored.append({
+            'text': chunk['text'],
+            'score': score,
+            'doc_title': chunk.get('doc_title', ''),
+        })
+    
+    # Sort by similarity score (highest first)
+    scored.sort(key=lambda x: x['score'], reverse=True)
+    return scored[:top_k]
+
+
+# ===== AI RESPONSE FUNCTIONS =====
 
 def get_ai_response(prompt, context=""):
     """
@@ -11,7 +102,7 @@ def get_ai_response(prompt, context=""):
         system_prompt = f"You are an AI assistant for a business. Context: {context}. Be helpful, professional, and concise."
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini", # Using a fast and cost-effective model
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
@@ -20,12 +111,56 @@ def get_ai_response(prompt, context=""):
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"AI Error: {str(e)}")
+        print(f"AI Error: {str(e)}") 
         return "I'm sorry, I'm having trouble thinking right now. Please try again later."
+
+
+def get_rag_response(query, relevant_chunks):
+    """
+    RAG Response — AI sirf retrieved chunks ke basis pe jawab deta hai.
+    
+    relevant_chunks: list of dicts with 'text', 'score', 'doc_title'
+    """
+    try:
+        # Build context from relevant chunks
+        context_parts = []
+        for i, chunk in enumerate(relevant_chunks, 1):
+            source = f" (from: {chunk['doc_title']})" if chunk.get('doc_title') else ""
+            context_parts.append(f"[Document Section {i}{source}]\n{chunk['text']}")
+        
+        knowledge_context = "\n\n".join(context_parts)
+
+        system_prompt = f"""You are a helpful business assistant. You MUST answer questions ONLY based on the business documents provided below.
+
+STRICT RULES:
+1. Only use information from the provided document sections to answer.
+2. Do NOT use any outside knowledge or general information.
+3. If the answer is NOT found in the documents, respond with: "I'm sorry, I don't have information about that in our knowledge base. Please contact us directly for help."
+4. Be concise, friendly, and professional.
+5. Respond in the same language the customer used.
+
+--- RELEVANT BUSINESS KNOWLEDGE ---
+{knowledge_context}
+--- END OF KNOWLEDGE ---"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ],
+            max_tokens=600,
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"RAG AI Error: {str(e)}")
+        return "I'm sorry, I'm unable to process your request right now. Please try again later."
+
 
 def get_platform_assistance(user_query):
     """
-    Specific assistant for explaining the Kon Hai Best platform.
+    Specific assistant for explaining the Aisaconnect platform.
     """
     platform_context = """
     Aisaconnect (Kon Hai Best) is a WhatsApp Automation SaaS. 

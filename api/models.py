@@ -128,3 +128,102 @@ class GlobalSetting(models.Model):
 
     def __str__(self):
         return self.key
+
+
+class KnowledgeDocument(models.Model):
+    """
+    RAG Knowledge Base — Client ke business documents store hote hain.
+    AI sirf inhi documents ke basis pe jawab deta hai.
+    """
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='knowledge_docs')
+    title = models.CharField(max_length=255)
+    file = models.FileField(upload_to='knowledge/', null=True, blank=True)
+    extracted_text = models.TextField(blank=True, default='')
+    file_type = models.CharField(max_length=20, blank=True, default='')  # pdf, docx, txt
+    file_size = models.IntegerField(default=0)  # bytes
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.client.business_name} — {self.title}"
+
+
+class KnowledgeChunk(models.Model):
+    """
+    Document ka ek chunk — embedding ke saath stored.
+    Har document multiple chunks mein split hota hai for accurate RAG retrieval.
+    """
+    document = models.ForeignKey(KnowledgeDocument, on_delete=models.CASCADE, related_name='chunks')
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='knowledge_chunks')
+    chunk_text = models.TextField()  # 500-800 word chunk
+    chunk_index = models.IntegerField(default=0)  # Order in the document
+    embedding = models.JSONField(default=list, blank=True)  # OpenAI embedding vector (1536 dims)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['document', 'chunk_index']
+
+    def __str__(self):
+        return f"Chunk {self.chunk_index} of {self.document.title}"
+
+class Contact(models.Model):
+    STAGE_CHOICES = [
+        ('NEW', 'New Lead'),
+        ('FOLLOWUP', 'Follow Up'),
+        ('NEGOTIATION', 'Negotiation'),
+        ('WON', 'Closed Won'),
+        ('LOST', 'Closed Lost'),
+    ]
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='contacts')
+    name = models.CharField(max_length=255, null=True, blank=True)
+    phone_number = models.CharField(max_length=50, null=True, blank=True)
+    email = models.EmailField(null=True, blank=True)
+    platform_id = models.CharField(max_length=255, help_text="WhatsApp ID, IG SID, or FB PSID")
+    stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='NEW')
+    tags = models.JSONField(default=list, blank=True)
+    notes = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('client', 'platform_id')
+
+    def __str__(self):
+        return f"{self.name or self.platform_id} ({self.client.business_name})"
+
+class Template(models.Model):
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='templates')
+    name = models.CharField(max_length=255)
+    language = models.CharField(max_length=50, default='en_US')
+    category = models.CharField(max_length=100, null=True, blank=True)
+    status = models.CharField(max_length=50, default='PENDING') # APPROVED, REJECTED, etc.
+    components = models.JSONField(default=list) # The template structure
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.language})"
+
+class Campaign(models.Model):
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('SENDING', 'Sending'),
+        ('COMPLETED', 'Completed'),
+        ('FAILED', 'Failed'),
+    ]
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='campaigns')
+    name = models.CharField(max_length=255)
+    template = models.ForeignKey(Template, on_delete=models.SET_NULL, null=True)
+    audience_filter = models.CharField(max_length=50, default='ALL') # 'ALL', 'NEW', 'WON', etc.
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
+    total_sent = models.IntegerField(default=0)
+    total_delivered = models.IntegerField(default=0)
+    total_read = models.IntegerField(default=0)
+    total_failed = models.IntegerField(default=0)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.status})"
+

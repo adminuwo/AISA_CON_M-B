@@ -5,12 +5,12 @@ from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.views import APIView
 from django.http import HttpResponse
-from .serializers import RegisterSerializer, UserSerializer, ClientSerializer, AutomationSerializer, WorkflowSerializer
-from .models import User, Client, Automation, Message, Workflow
+from .serializers import RegisterSerializer, UserSerializer, ClientSerializer, AutomationSerializer, WorkflowSerializer, ContactSerializer, TemplateSerializer, CampaignSerializer
+from .models import User, Client, Automation, Message, Workflow, KnowledgeDocument, KnowledgeChunk, Contact, Template, Campaign
 import requests
 import os
 import json
-from .ai_utils import get_ai_response, get_platform_assistance
+from .ai_utils import get_ai_response, get_platform_assistance, get_rag_response, get_embedding, chunk_text, find_relevant_chunks
 
 class RegisterView(views.APIView):
     permission_classes = [] 
@@ -113,6 +113,16 @@ class WorkflowViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Workflow.objects.filter(client=self.request.user.client)
+
+    def perform_create(self, serializer):
+        serializer.save(client=self.request.user.client)
+
+class ContactViewSet(viewsets.ModelViewSet):
+    serializer_class = ContactSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Contact.objects.filter(client=self.request.user.client)
 
     def perform_create(self, serializer):
         serializer.save(client=self.request.user.client)
@@ -343,6 +353,11 @@ class WhatsAppWebhookView(APIView):
                             print(f"Automation disabled for client: {client.business_name}")
                             continue
 
+                        contacts = value.get('contacts', [])
+                        contact_name = "Unknown"
+                        if contacts:
+                            contact_name = contacts[0].get('profile', {}).get('name', 'Unknown')
+
                         messages = value.get('messages', [])
                         for msg in messages:
                             from_number = msg.get('from')
@@ -360,6 +375,18 @@ class WhatsAppWebhookView(APIView):
                                 elif i_type == 'list_reply':
                                     body = msg.get('interactive', {}).get('list_reply', {}).get('title', '')
                             
+                            
+                            # Ensure Contact exists for CRM
+                            Contact.objects.get_or_create(
+                                client=client,
+                                platform_id=from_number,
+                                defaults={
+                                    'phone_number': from_number,
+                                    'name': contact_name,
+                                    'stage': 'NEW'
+                                }
+                            )
+
                             # Log the message
                             Message.objects.create(
                                 client=client,
@@ -401,9 +428,34 @@ class WhatsAppWebhookView(APIView):
                         break
             if match_found: break
 
-        # 2. If no keyword matched, check AI Assistant
+        # 2. If no keyword matched, check AI Assistant (Embedding RAG or plain)
         if not match_found and client.ai_enabled:
-            ai_reply = get_ai_response(incoming_text, client.ai_context)
+            # Try RAG with embeddings first
+            chunks = KnowledgeChunk.objects.filter(client=client).exclude(embedding=[])
+            if chunks.exists():
+                # Get query embedding
+                query_embedding = get_embedding(incoming_text)
+                if query_embedding:
+                    # Build chunks list for similarity search
+                    chunks_data = [{
+                        'text': c.chunk_text,
+                        'embedding': c.embedding,
+                        'doc_title': c.document.title
+                    } for c in chunks.select_related('document')]
+                    
+                    # Find top 5 most relevant chunks
+                    relevant = find_relevant_chunks(query_embedding, chunks_data, top_k=5)
+                    
+                    if relevant and relevant[0]['score'] > 0.3:  # Minimum similarity threshold
+                        ai_reply = get_rag_response(incoming_text, relevant)
+                    else:
+                        ai_reply = get_ai_response(incoming_text, client.ai_context or "")
+                else:
+                    ai_reply = get_ai_response(incoming_text, client.ai_context or "")
+            else:
+                # No embedded chunks — fallback to plain context
+                ai_reply = get_ai_response(incoming_text, client.ai_context or "")
+
             if ai_reply:
                 self.send_whatsapp_message(client, to_number, ai_reply, phone_number_id)
                 match_found = True
@@ -506,5 +558,258 @@ class PlatformAssistantView(APIView):
         response = get_platform_assistance(query)
         return Response({"response": response})
 
+
+class KnowledgeBaseView(APIView):
+    """
+    RAG Knowledge Base API with Embeddings
+    GET  /api/knowledge/       → Client ke saare documents list karo
+    POST /api/knowledge/       → Document upload → Extract text → Chunk → Embed → Store
+    DELETE /api/knowledge/<pk>/ → Document + chunks delete karo
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.client:
+            return Response([], status=200)
+        docs = KnowledgeDocument.objects.filter(client=request.user.client).order_by('-created_at')
+        data = []
+        for doc in docs:
+            chunk_count = doc.chunks.count()
+            embedded_count = doc.chunks.exclude(embedding=[]).count()
+            data.append({
+                "id": str(doc.id),
+                "title": doc.title,
+                "file_type": doc.file_type,
+                "file_size": doc.file_size,
+                "has_text": bool(doc.extracted_text),
+                "text_preview": doc.extracted_text[:200] + "..." if len(doc.extracted_text) > 200 else doc.extracted_text,
+                "chunks": chunk_count,
+                "embedded": embedded_count,
+                "fully_embedded": chunk_count > 0 and chunk_count == embedded_count,
+                "created_at": doc.created_at,
+            })
+        return Response(data)
+
+    def post(self, request):
+        if not request.user.client:
+            return Response({"message": "No client associated"}, status=400)
+
+        file = request.FILES.get('file')
+        title = request.data.get('title', '')
+
+        if not file:
+            return Response({"message": "File is required"}, status=400)
+
+        # File size check — max 5MB
+        if file.size > 5 * 1024 * 1024:
+            return Response({"message": "File too large. Maximum size is 5MB."}, status=400)
+
+        ext = os.path.splitext(file.name)[1].lower().lstrip('.')
+        if ext not in ['pdf', 'docx', 'txt']:
+            return Response({"message": "Only PDF, DOCX, and TXT files are supported."}, status=400)
+
+        if not title:
+            title = os.path.splitext(file.name)[0]
+
+        # === STEP 1: Extract text from file ===
+        extracted_text = ""
+        try:
+            if ext == 'pdf':
+                import PyPDF2
+                pdf_reader = PyPDF2.PdfReader(file)
+                for page in pdf_reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        extracted_text += page_text + "\n"
+            elif ext == 'docx':
+                import docx
+                doc_file = docx.Document(file)
+                for para in doc_file.paragraphs:
+                    if para.text.strip():
+                        extracted_text += para.text + "\n"
+            elif ext == 'txt':
+                extracted_text = file.read().decode('utf-8', errors='ignore')
+        except Exception as e:
+            print(f"Text extraction error: {str(e)}")
+            return Response({"message": f"Could not extract text from file: {str(e)}"}, status=400)
+
+        if not extracted_text.strip():
+            return Response({"message": "No readable text found in the file. Please check the file content."}, status=400)
+
+        # === STEP 2: Save document ===
+        knowledge_doc = KnowledgeDocument.objects.create(
+            client=request.user.client,
+            title=title,
+            extracted_text=extracted_text.strip(),
+            file_type=ext,
+            file_size=file.size,
+        )
+        knowledge_doc.file = file
+        knowledge_doc.save()
+
+        # === STEP 3: Chunk the text ===
+        chunks = chunk_text(extracted_text.strip(), chunk_size=800, overlap=100)
+        print(f"Document '{title}' split into {len(chunks)} chunks")
+
+        # === STEP 4: Generate embeddings for each chunk & save ===
+        embedded_count = 0
+        for i, chunk_content in enumerate(chunks):
+            embedding = get_embedding(chunk_content)
+            KnowledgeChunk.objects.create(
+                document=knowledge_doc,
+                client=request.user.client,
+                chunk_text=chunk_content,
+                chunk_index=i,
+                embedding=embedding if embedding else [],
+            )
+            if embedding:
+                embedded_count += 1
+
+        print(f"Successfully embedded {embedded_count}/{len(chunks)} chunks for '{title}'")
+
+        return Response({
+            "id": str(knowledge_doc.id),
+            "title": knowledge_doc.title,
+            "file_type": knowledge_doc.file_type,
+            "file_size": knowledge_doc.file_size,
+            "has_text": True,
+            "text_preview": extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text,
+            "chunks": len(chunks),
+            "embedded": embedded_count,
+            "fully_embedded": embedded_count == len(chunks),
+            "created_at": knowledge_doc.created_at,
+            "message": f"Document uploaded! {len(chunks)} chunks created, {embedded_count} embedded."
+        }, status=201)
+
+    def delete(self, request, pk):
+        if not request.user.client:
+            return Response({"message": "No client associated"}, status=400)
+        try:
+            doc = KnowledgeDocument.objects.get(id=pk, client=request.user.client)
+            # Chunks auto-delete via CASCADE
+            doc.delete()
+            return Response({"message": "Document and all chunks deleted successfully"}, status=200)
+        except KnowledgeDocument.DoesNotExist:
+            return Response({"message": "Document not found"}, status=404)
+
+
 def root_view(request):
     return HttpResponse("Aisaconnect Python API is running...")
+
+
+from rest_framework.decorators import action
+import threading
+
+class TemplateViewSet(viewsets.ModelViewSet):
+    serializer_class = TemplateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Template.objects.filter(client=self.request.user.client)
+
+    @action(detail=False, methods=['post'])
+    def sync_from_meta(self, request):
+        client = request.user.client
+        if not client.whatsapp_waba_id or not client.whatsapp_access_token:
+            return Response({"message": "WhatsApp WABA ID or Access Token is missing in client settings."}, status=400)
+        
+        url = f"https://graph.facebook.com/v19.0/{client.whatsapp_waba_id}/message_templates"
+        headers = {
+            "Authorization": f"Bearer {client.whatsapp_access_token}"
+        }
+        try:
+            res = requests.get(url, headers=headers)
+            data = res.json()
+            if 'data' in data:
+                synced_count = 0
+                for tmpl in data['data']:
+                    Template.objects.update_or_create(
+                        client=client,
+                        name=tmpl.get('name'),
+                        language=tmpl.get('language'),
+                        defaults={
+                            'category': tmpl.get('category'),
+                            'status': tmpl.get('status'),
+                            'components': tmpl.get('components', [])
+                        }
+                    )
+                    synced_count += 1
+                return Response({"message": f"Successfully synced {synced_count} templates."})
+            return Response({"message": "Failed to fetch templates from Meta.", "details": data}, status=400)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+class CampaignViewSet(viewsets.ModelViewSet):
+    serializer_class = CampaignSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Campaign.objects.filter(client=self.request.user.client).order_by('-created_at')
+
+    def perform_create(self, serializer):
+        campaign = serializer.save(client=self.request.user.client, status='SENDING')
+        
+        # Start background thread to process campaign
+        thread = threading.Thread(target=self.process_campaign, args=(campaign.id,))
+        thread.start()
+
+    def process_campaign(self, campaign_id):
+        try:
+            campaign = Campaign.objects.get(id=campaign_id)
+            client = campaign.client
+            template = campaign.template
+            
+            if not template or not client.whatsapp_access_token or not client.whatsapp_phone_number_id:
+                campaign.status = 'FAILED'
+                campaign.save()
+                return
+
+            # Determine audience
+            if campaign.audience_filter == 'ALL':
+                contacts = Contact.objects.filter(client=client)
+            else:
+                contacts = Contact.objects.filter(client=client, stage=campaign.audience_filter)
+
+            url = f"https://graph.facebook.com/v19.0/{client.whatsapp_phone_number_id}/messages"
+            headers = {
+                "Authorization": f"Bearer {client.whatsapp_access_token}",
+                "Content-Type": "application/json"
+            }
+
+            for contact in contacts:
+                if not contact.phone_number:
+                    campaign.total_failed += 1
+                    continue
+                
+                # We need country code, assume it's in phone_number for now
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": contact.phone_number,
+                    "type": "template",
+                    "template": {
+                        "name": template.name,
+                        "language": {
+                            "code": template.language
+                        }
+                    }
+                }
+                
+                try:
+                    res = requests.post(url, headers=headers, json=payload)
+                    if res.status_code == 200:
+                        campaign.total_sent += 1
+                    else:
+                        campaign.total_failed += 1
+                except Exception as e:
+                    campaign.total_failed += 1
+
+                # Update progress periodically or at the end
+                campaign.save()
+                
+            campaign.status = 'COMPLETED'
+            campaign.save()
+        except Exception as e:
+            print(f"Error processing campaign: {str(e)}")
+            campaign = Campaign.objects.get(id=campaign_id)
+            campaign.status = 'FAILED'
+            campaign.save()

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Client, Automation, Workflow, GlobalSetting
+from .models import User, Client, Automation, Workflow, GlobalSetting, Contact, Template, Campaign
 
 
 class ObjectIdField(serializers.Field):
@@ -94,3 +94,31 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = GlobalSetting
         fields = '__all__'
+
+class ContactSerializer(serializers.ModelSerializer):
+    id = ObjectIdField(read_only=True)
+    client = ObjectIdField(read_only=True)
+
+    class Meta:
+        model = Contact
+        fields = '__all__'
+        read_only_fields = ('client', 'created_at', 'updated_at')
+
+class TemplateSerializer(serializers.ModelSerializer):
+    id = ObjectIdField(read_only=True)
+    client = ObjectIdField(read_only=True)
+
+    class Meta:
+        model = Template
+        fields = '__all__'
+        read_only_fields = ('client', 'created_at', 'updated_at')
+
+class CampaignSerializer(serializers.ModelSerializer):
+    id = ObjectIdField(read_only=True)
+    client = ObjectIdField(read_only=True)
+    template = ObjectIdField(read_only=True)
+
+    class Meta:
+        model = Campaign
+        fields = '__all__'
+        read_only_fields = ('client', 'created_at', 'updated_at')

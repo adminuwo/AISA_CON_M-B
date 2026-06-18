@@ -1,11 +1,14 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import RegisterView, LoginView, ClientViewSet, AutomationViewSet, WorkflowViewSet, AdminStatsView, AdminAutomationsView, AdminMessagesView, WhatsAppWebhookView, AdminUsersView, ProfileView, ClientMessagesView, GlobalSettingsView, PlatformAssistantView
+from .views import RegisterView, LoginView, ClientViewSet, AutomationViewSet, WorkflowViewSet, ContactViewSet, AdminStatsView, AdminAutomationsView, AdminMessagesView, WhatsAppWebhookView, AdminUsersView, ProfileView, ClientMessagesView, GlobalSettingsView, PlatformAssistantView, KnowledgeBaseView, TemplateViewSet, CampaignViewSet
 
 router = DefaultRouter()
 router.register(r'clients', ClientViewSet, basename='client')
 router.register(r'automations', AutomationViewSet, basename='automation')
 router.register(r'workflows', WorkflowViewSet, basename='workflow')
+router.register(r'contacts', ContactViewSet, basename='contact')
+router.register(r'templates', TemplateViewSet, basename='template')
+router.register(r'campaigns', CampaignViewSet, basename='campaign')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -21,4 +24,7 @@ urlpatterns = [
     path('platform-assistant/', PlatformAssistantView.as_view(), name='platform-assistant'),
     path('admin/settings/global', GlobalSettingsView.as_view(), name='global-settings'),
     path('webhook/whatsapp', WhatsAppWebhookView.as_view(), name='whatsapp-webhook'),
+    # RAG Knowledge Base
+    path('knowledge/', KnowledgeBaseView.as_view(), name='knowledge-base'),
+    path('knowledge/<str:pk>/', KnowledgeBaseView.as_view(), name='knowledge-base-detail'),
 ]
