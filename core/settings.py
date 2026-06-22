@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load .env
 env_path = os.path.join(BASE_DIR, '.env')
-load_dotenv(env_path)
+load_dotenv(env_path, override=True)
 
 
 
@@ -128,9 +128,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django_mongodb_backend',
         'NAME': os.getenv('MONGODB_DB_NAME', 'aisaconnect_db'),
-        'CLIENT': {
-            'host': os.getenv('MONGODB_URI'),
-        }
+        'HOST': os.getenv('MONGODB_URI'),
     }
 }
 
