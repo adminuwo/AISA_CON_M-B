@@ -5,9 +5,9 @@ certifi==2026.4.22
 charset-normalizer==3.4.7
 colorama==0.4.6
 distro==1.9.0
-Django==6.0.5
+Django==5.2.15
 django-cors-headers==4.9.0
-django-mongodb-backend==6.0.3
+django-mongodb-backend==5.2.3
 djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
 dnspython==2.8.0
