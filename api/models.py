@@ -130,6 +130,9 @@ class GlobalSetting(models.Model):
         return self.key
 
 
+def client_directory_path(instance, filename):
+    return f'knowledge/client_{instance.client.id}/{filename}'
+
 class KnowledgeDocument(models.Model):
     """
     RAG Knowledge Base — Client ke business documents store hote hain.
@@ -137,7 +140,7 @@ class KnowledgeDocument(models.Model):
     """
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='knowledge_docs')
     title = models.CharField(max_length=255)
-    file = models.FileField(upload_to='knowledge/', null=True, blank=True)
+    file = models.FileField(upload_to=client_directory_path, null=True, blank=True)
     extracted_text = models.TextField(blank=True, default='')
     file_type = models.CharField(max_length=20, blank=True, default='')  # pdf, docx, txt
     file_size = models.IntegerField(default=0)  # bytes
