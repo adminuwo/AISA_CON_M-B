@@ -1,19 +1,12 @@
-import os
-import django
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
-django.setup()
+db = MongoClient('mongodb+srv://admin_db_user:admin%40123@cluster0.drmnlav.mongodb.net/?appName=Cluster0')['aisaconnect_db_v5']
 
-from api.models import User, Client
+new_token = "EAGKlZCKb8jnEBR6VPc3tc0hGw005yB1ZBRzSj9Leo2F4alDaw1CgIUqcJvGR5LDGhcSsM7MhyjoB2ftbFrkiAAT0K5k1vPjePowKkSP6yZBY1XWt1KIoTZAmuCF6oZC6ZBiaBfdk658jHaxVF2WveFzkBtSGLgpFScWVC92sW4hJKKgwGYNiKdFCVp37IS2SPhxccMXX7CJmEhW1X0CGUIIhwjfmpD73h06lVKnLynbrgmgEKuocjI6EsyHw7ospr6AmwVvYchBNSAIHcudcl19bNa"
 
-try:
-    user = User.objects.get(email='abha@uwo24.com')
-    client = user.client
-    if client:
-        client.whatsapp_access_token = "EAGKlZCKb8jnEBR6ZC2PkdwQYJ592ecI3AshrXDn6QsackbdNIdsL5IrSi2Td4a35akirT5ZBLHD3Q1GanFS9lFf3doIBECTjf9DlVzYBnlu1qDIp9qOHo2z2bZBbiB0GDf2ZAvvPaCZBa5LK4HZCEwLIg1vZBYLtqXUtnjSXNBAJ3gMVWrXfwV6rRX3sRZAYF6APwDRtpb8G098TywL9ChnYrEzlZB2scGIjasK5o3MSA9LhR3R7VYktVCGP6HD94CntwHZB9y8Kx2hsiLw4ZCIa1U7zcYZBo"
-        client.save()
-        print(f"SUCCESS: Updated access token for client '{client.business_name}'")
-    else:
-        print("ERROR: User abha@uwo24.com has no associated client.")
-except Exception as e:
-    print(f"ERROR: {e}")
+db.api_client.update_one(
+    {'_id': ObjectId('6a3a2795f2f0b557ad3db1a6')},
+    {'$set': {'whatsapp_access_token': new_token}}
+)
+print('Token updated successfully!')

@@ -414,6 +414,14 @@ class WhatsAppWebhookView(APIView):
         Matches keywords and sends automated responses.
         If no keyword matches, sends the Global Greeting Message if enabled.
         """
+        from .workflow_engine import WorkflowEngine
+        
+        # 0. Check Workflow Engine first
+        wf_text, wf_buttons = WorkflowEngine.process_workflow(client, to_number, incoming_text)
+        if wf_text:
+            self.send_whatsapp_message(client, to_number, wf_text, phone_number_id, wf_buttons)
+            return  # Stop further processing if a workflow handled it
+
         automations = Automation.objects.filter(client=client, enabled=True, trigger_type='KEYWORD')
         incoming_text_lower = incoming_text.lower().strip()
         

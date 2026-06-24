@@ -84,6 +84,16 @@ class Workflow(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+class WorkflowSession(models.Model):
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='workflow_sessions')
+    phone_number = models.CharField(max_length=50) # The customer's WhatsApp number
+    workflow = models.ForeignKey(Workflow, on_delete=models.CASCADE, related_name='sessions')
+    current_node_id = models.CharField(max_length=255)
+    variables = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
 class Message(models.Model):
     CHANNEL_CHOICES = [
         ('WHATSAPP', 'WhatsApp'),
