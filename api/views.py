@@ -520,7 +520,7 @@ class WhatsAppWebhookView(APIView):
                 message_type='OUTGOING',
                 whatsapp_message_id=res_data.get('messages', [{}])[0].get('id') if 'messages' in res_data else None,
                 status='SENT' if response.status_code == 200 else 'FAILED',
-                metadata=payload
+                metadata={"payload": payload, "response": res_data}
             )
         except Exception as e:
             print(f"Failed to send message: {str(e)}")
