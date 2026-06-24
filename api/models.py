@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractUser
 
 class Client(models.Model):
     business_name = models.CharField(max_length=255)
+    phone_number = models.CharField(max_length=50, null=True, blank=True)
     automation_enabled = models.BooleanField(default=True)
     
     # Enablement Flags
