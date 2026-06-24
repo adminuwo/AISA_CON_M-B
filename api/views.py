@@ -555,6 +555,26 @@ class ClientMessagesView(APIView):
             })
         return Response(data)
 
+    def post(self, request):
+        client = request.user.client
+        if not client:
+            return Response({"error": "No client associated"}, status=400)
+            
+        to_number = request.data.get('to_number')
+        body = request.data.get('body')
+        
+        if not to_number or not body:
+            return Response({"error": "to_number and body are required"}, status=400)
+            
+        phone_number_id = client.whatsapp_phone_number_id
+        if not phone_number_id:
+            return Response({"error": "WhatsApp not connected"}, status=400)
+            
+        webhook_view = WhatsAppWebhookView()
+        webhook_view.send_whatsapp_message(client, to_number, body, phone_number_id)
+        
+        return Response({"status": "sent"})
+
 class PlatformAssistantView(APIView):
     permission_classes = [IsAuthenticated]
 
