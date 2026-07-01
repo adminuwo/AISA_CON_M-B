@@ -322,10 +322,10 @@ class WhatsAppWebhookView(APIView):
         if mode and token:
             if mode == 'subscribe' and token == verify_token:
                 print("WEBHOOK_VERIFIED")
-                return HttpResponse(challenge, status=200)
+                return HttpResponse(challenge, content_type="text/plain", status=200)
             else:
-                return HttpResponse("Forbidden", status=403)
-        return HttpResponse("Bad Request", status=400)
+                return HttpResponse("Forbidden", content_type="text/plain", status=403)
+        return HttpResponse("Bad Request", content_type="text/plain", status=400)
 
     def post(self, request):
         """
